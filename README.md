@@ -26,6 +26,7 @@ A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 > &nbsp;&nbsp;• --no-markers  
 > </small>
 
+
 ## Requirements
 - Python 3.x
 - HandBrakeCLI (at C:\Program Files\HandBrake\HandBrakeCLI.exe)

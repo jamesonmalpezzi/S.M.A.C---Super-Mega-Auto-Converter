@@ -2,6 +2,10 @@
 
 A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 
+<p align="center">
+<img src="https://github.com/jamesonmalpezzi/S.M.A.C---Super-Mega-Auto-Converter/blob/main/screenshot.jpg">
+</p>
+
 ## Features
 - Converts video files (MKV, AVI, MOV, M4V, WMV) to MP4 with x265 10-bit encoding.
 - User-friendly interface with a log window and sound effects.
@@ -32,7 +36,3 @@ A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 ## Usage
 - Update directory file paths for media to your personal path
 - Run `transcode_gui.py` or build with `build_transcode.ps1` to create an executable.
-
-<p align="center">
-<img src="https://github.com/jamesonmalpezzi/S.M.A.C---Super-Mega-Auto-Converter/blob/main/screenshot.jpg">
-</p>

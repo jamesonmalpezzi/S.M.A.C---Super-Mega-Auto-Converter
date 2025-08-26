@@ -1,0 +1,362 @@
+import os
+import subprocess
+from pathlib import Path
+import tkinter as tk
+from tkinter import filedialog, ttk, scrolledtext
+from PIL import Image, ImageTk
+import threading
+import queue
+import pygame
+from rich.console import Console
+from rich.progress import Progress, BarColumn, TimeElapsedColumn, TimeRemainingColumn, TaskProgressColumn
+
+# Initialize rich console for logging
+console = Console(record=True)
+log_queue = queue.Queue()
+
+# Initialize pygame mixer for sound effects
+pygame.mixer.init()
+
+# HandBrake CLI executable path
+HANDBRAKE_CLI = r"C:\Program Files\HandBrake\HandBrakeCLI.exe"
+
+# Video extensions to process
+VIDEO_EXTENSIONS = [".mkv", ".avi", ".mov", ".m4v", ".wmv"]
+
+# Sound effect paths (in current directory)
+START_SOUND = "luigi-here-we-go.mp3"
+FINISH_SOUND = "jobs_done.mp3"
+ERROR_SOUND = "bmw-bong.mp3"
+
+# Version number
+VERSION = "v0.1"
+
+# Global flag to control transcoding
+stop_transcoding = False
+
+def process_video(filepath: Path, progress, task_id):
+    """Run HandBrakeCLI on a single video file and replace it with the processed version."""
+    global stop_transcoding
+    if stop_transcoding:
+        log_queue.put("⛔ Transcoding stopped by user")
+        return False
+    
+    # Verify HandBrakeCLI exists
+    if not os.path.exists(HANDBRAKE_CLI):
+        log_queue.put(f"❌ HandBrakeCLI.exe not found at {HANDBRAKE_CLI}")
+        try:
+            pygame.mixer.Sound(ERROR_SOUND).play()
+        except Exception as e:
+            log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+        progress.update(task_id, advance=1)
+        return True
+    
+    # Verify file exists and is accessible
+    if not filepath.exists() or not filepath.is_file():
+        log_queue.put(f"❌ File does not exist or is not accessible: {filepath}")
+        try:
+            pygame.mixer.Sound(ERROR_SOUND).play()
+        except Exception as e:
+            log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+        progress.update(task_id, advance=1)
+        return True
+    
+    # Validate input file with HandBrakeCLI scan
+    try:
+        scan_result = subprocess.run([
+            HANDBRAKE_CLI,
+            "-i", str(filepath),
+            "--scan"
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+        if scan_result.returncode != 0:
+            log_queue.put(f"❌ Invalid video file {filepath}: HandBrake scan failed")
+            log_queue.put(f"STDERR: {scan_result.stderr}")
+            try:
+                pygame.mixer.Sound(ERROR_SOUND).play()
+            except Exception as e:
+                log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+            progress.update(task_id, advance=1)
+            return True
+    except Exception as e:
+        log_queue.put(f"❌ Error scanning {filepath}: {str(e)}")
+        try:
+            pygame.mixer.Sound(ERROR_SOUND).play()
+        except Exception as e:
+            log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+        progress.update(task_id, advance=1)
+        return True
+    
+    temp_output = filepath.with_suffix(".mp4")
+    log_queue.put(f"▶ Processing: {filepath}")
+    
+    try:
+        result = subprocess.run([
+            HANDBRAKE_CLI,
+            "-i", str(filepath),
+            "-o", str(temp_output),
+            "--format", "av_mp4",
+            "--encoder", "x265_10bit",
+            "--encoder-profile", "main10",
+            "--encoder-level", "5.1",
+            "--quality", "24",
+            "--cfr",
+            "--keep-display-aspect",
+            "--crop", "0:0:0:0",
+            "--decomb",
+            "--aencoder", "eac3",
+            "--ab", "448",
+            "--mixdown", "stereo",
+            "--arate", "48",
+            "--audio-lang-list", "eng",
+            "--subtitle-burned",
+            "--no-markers"
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3600)
+    except subprocess.TimeoutExpired:
+        log_queue.put(f"❌ Timeout processing {filepath}: HandBrake took too long")
+        if temp_output.exists():
+            temp_output.unlink()
+        try:
+            pygame.mixer.Sound(ERROR_SOUND).play()
+        except Exception as e:
+            log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+        progress.update(task_id, advance=1)
+        return True
+    except Exception as e:
+        log_queue.put(f"❌ Unexpected error processing {filepath}: {str(e)}")
+        if temp_output.exists():
+            temp_output.unlink()
+        try:
+            pygame.mixer.Sound(ERROR_SOUND).play()
+        except Exception as e:
+            log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+        progress.update(task_id, advance=1)
+        return True
+    
+    if stop_transcoding:
+        log_queue.put("⛔ Transcoding stopped by user")
+        if temp_output.exists():
+            temp_output.unlink()
+        return False
+    
+    if result.returncode != 0 or not temp_output.exists() or temp_output.stat().st_size == 0:
+        log_queue.put(f"❌ Error processing {filepath}: HandBrake failed or output invalid")
+        log_queue.put(f"STDERR: {result.stderr}")
+        log_queue.put(f"STDOUT: {result.stdout}")
+        if temp_output.exists():
+            temp_output.unlink()
+        try:
+            pygame.mixer.Sound(ERROR_SOUND).play()
+        except Exception as e:
+            log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+        progress.update(task_id, advance=1)
+        return True
+    
+    log_queue.put(f"✅ Finished: {temp_output}")
+    if temp_output.exists() and temp_output.stat().st_size > 0:
+        try:
+            filepath.unlink()
+        except Exception as e:
+            log_queue.put(f"❌ Failed to delete original file {filepath}: {str(e)}")
+            try:
+                pygame.mixer.Sound(ERROR_SOUND).play()
+            except Exception as e:
+                log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+    else:
+        log_queue.put(f"❌ Output file missing or empty: {temp_output}")
+        try:
+            pygame.mixer.Sound(ERROR_SOUND).play()
+        except Exception as e:
+            log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+    progress.update(task_id, advance=1)
+    return True
+
+def collect_files(root_dir: Path):
+    """Collect all video files recursively."""
+    files = []
+    for dirpath, _, filenames in os.walk(root_dir):
+        for filename in filenames:
+            file_path = Path(dirpath) / filename
+            if file_path.suffix.lower() in VIDEO_EXTENSIONS:
+                files.append(file_path)
+    return files
+
+def run_transcode(directory, log_text):
+    """Run the transcoding process for the given directory."""
+    global stop_transcoding
+    # Check if HandBrakeCLI exists before starting
+    if not os.path.exists(HANDBRAKE_CLI):
+        log_queue.put(f"❌ HandBrakeCLI.exe not found at {HANDBRAKE_CLI}. Please ensure it is installed.")
+        try:
+            pygame.mixer.Sound(ERROR_SOUND).play()
+        except Exception as e:
+            log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+        return
+    
+    log_queue.put(f"Starting transcoding for directory: {directory}")
+    files = collect_files(Path(directory))
+    total_files = len(files)
+    if total_files == 0:
+        log_queue.put(f"No video files found in {directory}")
+        try:
+            pygame.mixer.Sound(ERROR_SOUND).play()
+        except Exception as e:
+            log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+        return
+    log_queue.put(f"Found {total_files} video files to process.")
+    
+    with Progress(
+        "[progress.description]{task.description}",
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console
+    ) as progress:
+        task_id = progress.add_task("Encoding videos...", total=total_files)
+        for file in files:
+            if stop_transcoding:
+                log_queue.put("⛔ Transcoding stopped by user")
+                break
+            if not process_video(file, progress, task_id):
+                break
+    
+    if not stop_transcoding:
+        log_queue.put("🎉 All files processed!")
+        try:
+            pygame.mixer.Sound(FINISH_SOUND).play()
+        except Exception as e:
+            log_queue.put(f"❌ Error playing sound {FINISH_SOUND}: {str(e)}")
+
+class TranscodeApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("S.M.A.C - Super Mega Auto Converter")
+        self.root.configure(bg="#f0f0f0")  # Light grey background
+        self.root.resizable(True, True)  # Make window resizable
+        self.root.geometry("600x700")  # Set window size to 600px wide, 700px tall
+        
+        # Apply macOS-like style
+        style = ttk.Style()
+        style.configure("TLabel", font=("Helvetica", 12), background="#f0f0f0", foreground="black")
+        style.configure("TEntry", font=("Helvetica", 10), fieldbackground="black", foreground="grey")
+        style.configure("TButton", font=("Helvetica", 10), background="#f0f0f0", foreground="black")
+        style.configure("Stop.TButton", font=("Helvetica", 10), background="#f0f0f0", foreground="red")
+        
+        # Title frame with image
+        title_frame = tk.Frame(root, bg="#f0f0f0")
+        title_frame.pack(pady=20)
+        title_label = ttk.Label(title_frame, text="S.M.A.C - Super Mega Auto Converter", font=("Helvetica", 18, "bold"), foreground="black")
+        title_label.pack(side=tk.LEFT)
+        
+        # Load and display mario.png from current directory
+        try:
+            mario_img = Image.open("mario.png")
+            mario_img = mario_img.resize((50, 50), Image.LANCZOS)
+            self.mario_photo = ImageTk.PhotoImage(mario_img)
+            mario_label = ttk.Label(title_frame, image=self.mario_photo, background="#f0f0f0")
+            mario_label.pack(side=tk.RIGHT, padx=10)
+        except Exception as e:
+            log_queue.put(f"❌ Error loading mario.png: {e}")
+        
+        # Directory selection
+        dir_frame = tk.Frame(root, bg="#f0f0f0")
+        dir_frame.pack(pady=5)
+        self.dir_label = ttk.Label(dir_frame, text="Select Folder:", foreground="black")
+        self.dir_label.pack(side=tk.LEFT, padx=5)
+        self.dir_entry = ttk.Entry(dir_frame, width=50)
+        self.dir_entry.pack(side=tk.LEFT, padx=5)
+        self.dir_entry.insert(0, r"\\192.168.1.4\Plex Server\MEDIA\TV Shows\Solar Opposites\Season 3")
+        self.browse_button = ttk.Button(root, text="Browse", command=self.browse_folder)
+        self.browse_button.pack(pady=5)
+        
+        # Button frame for Start and Stop
+        button_frame = tk.Frame(root, bg="#f0f0f0")
+        button_frame.pack(pady=10)
+        self.start_button = ttk.Button(button_frame, text="Start Transcoding", command=self.start_transcode)
+        self.start_button.pack(side=tk.LEFT, padx=10)
+        self.stop_button = ttk.Button(button_frame, text="Stop Transcoding", command=self.stop_transcode, style="Stop.TButton", state='disabled')
+        self.stop_button.pack(side=tk.LEFT, padx=10)
+        
+        # Log area
+        self.log_text = scrolledtext.ScrolledText(root, height=20, width=80, state='normal', font=("Helvetica", 10), fg="green", bg="black")
+        self.log_text.pack(pady=20)
+        self.log_text.insert(tk.END, "Mama Mia! Let's convert some media files!\n")
+        
+        # Footer with version
+        footer_frame = tk.Frame(root, bg="#f0f0f0")
+        footer_frame.pack(pady=5)
+        version_label = ttk.Label(footer_frame, text=VERSION, font=("Helvetica", 8), foreground="black", background="#f0f0f0")
+        version_label.pack()
+        footer_label = ttk.Label(footer_frame, text="Designed by GooseWurkz", font=("Helvetica", 8), foreground="black", background="#f0f0f0")
+        footer_label.pack()
+        
+        # Log update thread
+        self.running = True
+        self.log_thread = threading.Thread(target=self.update_logs)
+        self.log_thread.daemon = True
+        self.log_thread.start()
+
+    def browse_folder(self):
+        """Open a native Windows folder picker dialog."""
+        folder = filedialog.askdirectory(initialdir=r"\\192.168.1.4\Plex Server\MEDIA")
+        if folder:
+            self.dir_entry.delete(0, tk.END)
+            self.dir_entry.insert(0, folder)
+
+    def start_transcode(self):
+        """Start the transcoding process in a separate thread."""
+        global stop_transcoding
+        stop_transcoding = False
+        directory = self.dir_entry.get().strip()
+        if not directory or not os.path.exists(directory):
+            self.log_text.insert(tk.END, "Error: Invalid or inaccessible directory\n")
+            self.log_text.see(tk.END)
+            try:
+                pygame.mixer.Sound(ERROR_SOUND).play()
+            except Exception as e:
+                self.log_text.insert(tk.END, f"❌ Error playing sound {ERROR_SOUND}: {str(e)}\n")
+            return
+        self.start_button.config(state='disabled')
+        self.stop_button.config(state='normal')
+        self.log_text.delete(1.0, tk.END)
+        while not log_queue.empty():
+            log_queue.get()
+        try:
+            pygame.mixer.Sound(START_SOUND).play()
+        except Exception as e:
+            self.log_text.insert(tk.END, f"❌ Error playing sound {START_SOUND}: {str(e)}\n")
+        thread = threading.Thread(target=run_transcode, args=(directory, self.log_text))
+        thread.start()
+        def check_thread():
+            if thread.is_alive():
+                self.root.after(1000, check_thread)
+            else:
+                self.start_button.config(state='normal')
+                self.stop_button.config(state='disabled')
+        self.root.after(1000, check_thread)
+
+    def stop_transcode(self):
+        """Stop the transcoding process."""
+        global stop_transcoding
+        stop_transcoding = True
+        self.start_button.config(state='normal')
+        self.stop_button.config(state='disabled')
+
+    def update_logs(self):
+        """Update the log area with messages from the queue."""
+        while self.running:
+            try:
+                log = log_queue.get(timeout=1)
+                self.log_text.insert(tk.END, f"{log}\n")
+                self.log_text.see(tk.END)
+            except queue.Empty:
+                continue
+
+    def __del__(self):
+        self.running = False
+        pygame.mixer.quit()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = TranscodeApp(root)
+    root.mainloop()

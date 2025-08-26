@@ -265,7 +265,7 @@ class TranscodeApp:
         self.dir_label.pack(side=tk.LEFT, padx=5)
         self.dir_entry = ttk.Entry(dir_frame, width=50)
         self.dir_entry.pack(side=tk.LEFT, padx=5)
-        self.dir_entry.insert(0, r"\\192.168.1.4\Plex Server\MEDIA\TV Shows\Solar Opposites\Season 3")
+        self.dir_entry.insert(0, r"\\192.168.1.4\Plex Server\MEDIA")
         self.browse_button = ttk.Button(root, text="Browse", command=self.browse_folder)
         self.browse_button.pack(pady=5)
         
@@ -359,4 +359,5 @@ class TranscodeApp:
 if __name__ == "__main__":
     root = tk.Tk()
     app = TranscodeApp(root)
+
     root.mainloop()

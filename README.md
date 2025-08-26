@@ -9,6 +9,7 @@ A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 ## Features
 - Converts video files (MKV, AVI, MOV, M4V, WMV) to MP4 with x265 10-bit encoding.<br>
   <i>(.mp4 is skipped as that is the current output type to avoid re-encodeding previsouly encoded files)</i>
+- Deletes origal file after encoding of new file is complete to save you clean-up time!
 - User-friendly interface with a log window and sound effects.
 - Version: v0.1
 - Current version is for 1080p media with the following encoder options for best compression/quality balance:

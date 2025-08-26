@@ -8,6 +8,7 @@ A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 - Current version is for 1080p media with the following encoder options for best compression/quality balance:
 > **Encoding Settings**
 >
+> <small>
 > - `--format av_mp4`
 > - `--encoder x265_10bit`
 > - `--encoder-profile main10`
@@ -24,6 +25,7 @@ A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 > - `--audio-lang-list eng`
 > - `--subtitle-burned`
 > - `--no-markers`
+> </small>
 
 
 ## Requirements

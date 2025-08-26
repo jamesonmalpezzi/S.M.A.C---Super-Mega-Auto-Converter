@@ -35,7 +35,7 @@ A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 - Dependencies: tkinter, PIL, pygame, rich
 
 ## Notes
-- <i>(.mp4 is skipped as that is the current output type to avoid re-encodeding previsouly encoded files)</i>
+- .mp4 source files are skipped, as they are the current output type, to avoid re-encoding previously encoded files.
 
 ## Usage
 - Update directory file paths for media to your personal path

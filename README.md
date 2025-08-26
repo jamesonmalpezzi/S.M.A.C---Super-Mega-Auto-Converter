@@ -15,9 +15,7 @@ A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 > - `--encoder-profile main10`
 > - `--encoder-level 5.1`
 > - `--quality 24`
-> - `--cfr`
 > - `--keep-display-aspect`
-> - `--crop 0:0:0:0`
 > - `--decomb`
 > - `--aencoder eac3`
 > - `--ab 448`
@@ -25,7 +23,6 @@ A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 > - `--arate 48`
 > - `--audio-lang-list eng`
 > - `--subtitle-burned`
-> - `--no-markers`
 
 ## Requirements
 - Python 3.x

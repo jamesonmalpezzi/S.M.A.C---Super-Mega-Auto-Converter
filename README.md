@@ -15,4 +15,4 @@ A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 - Update directory file paths for media to your personal path
 - Run `transcode_gui.py` or build with `build_transcode.ps1` to create an executable.
 
-![alt text](https://github.com/jamesonmalpezzi/S.M.A.C---Super-Mega-Auto-Converter/screenshot.jpg?raw=true)
+![alt text](https://github.com/jamesonmalpezzi/S.M.A.C---Super-Mega-Auto-Converter/screenshot.jpg](https://github.com/jamesonmalpezzi/S.M.A.C---Super-Mega-Auto-Converter/blob/main/screenshot.jpg?raw=true)

@@ -30,16 +30,15 @@ FINISH_SOUND = os.path.join(SCRIPT_DIR, "sounds", "jobs_done.mp3")
 ERROR_SOUND = os.path.join(SCRIPT_DIR, "sounds", "bmw-bong.mp3")
 
 # Version number
-VERSION = "v0.5"
+VERSION = "v0.4"
 
-# Global flags and subprocess list
+# Global flag to control transcoding and animation
 stop_transcoding = False
 is_animating = False
-subprocesses = []
 
 def process_video(filepath: Path, progress, task_id, app):
     """Run HandBrakeCLI on a single video file and replace it with the processed version."""
-    global stop_transcoding, is_animating, subprocesses
+    global stop_transcoding, is_animating
     if stop_transcoding:
         log_queue.put("⛔ Transcoding stopped by user")
         return False
@@ -66,32 +65,26 @@ def process_video(filepath: Path, progress, task_id, app):
     
     # Validate input file with HandBrakeCLI scan
     try:
-        scan_proc = subprocess.Popen([
+        scan_result = subprocess.run([
             HANDBRAKE_CLI,
             "-i", str(filepath),
             "--scan"
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        subprocesses.append(scan_proc)
-        stdout, stderr = scan_proc.communicate(timeout=300)
-        if scan_proc.returncode != 0:
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300, creationflags=subprocess.CREATE_NO_WINDOW)
+        if scan_result.returncode != 0:
             log_queue.put(f"❌ Invalid video file {filepath}: HandBrake scan failed")
-            log_queue.put(f"STDERR: {stderr}")
+            log_queue.put(f"STDERR: {scan_result.stderr}")
             try:
                 pygame.mixer.Sound(ERROR_SOUND).play()
             except Exception as e:
                 log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
-            subprocesses.remove(scan_proc)
             progress.update(task_id, advance=1)
             return True
-        subprocesses.remove(scan_proc)
     except Exception as e:
         log_queue.put(f"❌ Error scanning {filepath}: {str(e)}")
         try:
             pygame.mixer.Sound(ERROR_SOUND).play()
         except Exception as e:
             log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
-        if scan_proc in subprocesses:
-            subprocesses.remove(scan_proc)
         progress.update(task_id, advance=1)
         return True
     
@@ -109,7 +102,7 @@ def process_video(filepath: Path, progress, task_id, app):
     app.root.after(100, update_progress)
     
     try:
-        encode_proc = subprocess.Popen([
+        result = subprocess.run([
             HANDBRAKE_CLI,
             "-i", str(filepath),
             "-o", str(temp_output),
@@ -129,25 +122,7 @@ def process_video(filepath: Path, progress, task_id, app):
             "--audio-lang-list", "eng",
             "--subtitle-burned",
             "--no-markers"
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        subprocesses.append(encode_proc)
-        stdout, stderr = encode_proc.communicate(timeout=3600)
-        if encode_proc.returncode != 0 or not temp_output.exists() or temp_output.stat().st_size == 0:
-            log_queue.put(f"❌ Error processing {filepath}: HandBrake failed or output invalid")
-            log_queue.put(f"STDERR: {stderr}")
-            log_queue.put(f"STDOUT: {stdout}")
-            if temp_output.exists():
-                temp_output.unlink()
-            try:
-                pygame.mixer.Sound(ERROR_SOUND).play()
-            except Exception as e:
-                log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
-            is_animating = False
-            app.progress_bar['value'] = 0
-            subprocesses.remove(encode_proc)
-            progress.update(task_id, advance=1)
-            return True
-        subprocesses.remove(encode_proc)
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3600, creationflags=subprocess.CREATE_NO_WINDOW)
     except subprocess.TimeoutExpired:
         log_queue.put(f"❌ Timeout processing {filepath}: HandBrake took too long")
         if temp_output.exists():
@@ -156,8 +131,6 @@ def process_video(filepath: Path, progress, task_id, app):
             pygame.mixer.Sound(ERROR_SOUND).play()
         except Exception as e:
             log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
-        if encode_proc in subprocesses:
-            subprocesses.remove(encode_proc)
         is_animating = False
         app.progress_bar['value'] = 0
         progress.update(task_id, advance=1)
@@ -170,8 +143,6 @@ def process_video(filepath: Path, progress, task_id, app):
             pygame.mixer.Sound(ERROR_SOUND).play()
         except Exception as e:
             log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
-        if encode_proc in subprocesses:
-            subprocesses.remove(encode_proc)
         is_animating = False
         app.progress_bar['value'] = 0
         progress.update(task_id, advance=1)
@@ -183,9 +154,22 @@ def process_video(filepath: Path, progress, task_id, app):
             temp_output.unlink()
         is_animating = False
         app.progress_bar['value'] = 0
-        if encode_proc in subprocesses:
-            subprocesses.remove(encode_proc)
         return False
+    
+    if result.returncode != 0 or not temp_output.exists() or temp_output.stat().st_size == 0:
+        log_queue.put(f"❌ Error processing {filepath}: HandBrake failed or output invalid")
+        log_queue.put(f"STDERR: {result.stderr}")
+        log_queue.put(f"STDOUT: {result.stdout}")
+        if temp_output.exists():
+            temp_output.unlink()
+        try:
+            pygame.mixer.Sound(ERROR_SOUND).play()
+        except Exception as e:
+            log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+        is_animating = False
+        app.progress_bar['value'] = 0
+        progress.update(task_id, advance=1)
+        return True
     
     log_queue.put(f"✅ Finished: {temp_output}")
     if temp_output.exists() and temp_output.stat().st_size > 0:
@@ -222,7 +206,7 @@ def collect_files(root_dir: Path):
 
 def run_transcode(directory, log_text, app):
     """Run the transcoding process for the given directory."""
-    global stop_transcoding, is_animating, subprocesses
+    global stop_transcoding, is_animating
     # Check if HandBrakeCLI exists before starting
     if not os.path.exists(HANDBRAKE_CLI):
         log_queue.put(f"❌ HandBrakeCLI.exe not found at {HANDBRAKE_CLI}. Please ensure it is installed.")
@@ -269,14 +253,6 @@ def run_transcode(directory, log_text, app):
     # Ensure progress bar is stopped
     is_animating = False
     app.progress_bar['value'] = 0
-    # Terminate any remaining subprocesses
-    for proc in subprocesses:
-        try:
-            proc.terminate()
-            proc.wait(timeout=5)
-        except:
-            pass
-    subprocesses.clear()
 
 class TranscodeApp:
     def __init__(self, root):
@@ -353,9 +329,6 @@ class TranscodeApp:
         self.log_thread = threading.Thread(target=self.update_logs)
         self.log_thread.daemon = True
         self.log_thread.start()
-        
-        # Bind window close event
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def browse_folder(self):
         """Open a native Windows folder picker dialog."""
@@ -366,7 +339,7 @@ class TranscodeApp:
 
     def start_transcode(self):
         """Start the transcoding process in a separate thread."""
-        global stop_transcoding, is_animating, subprocesses
+        global stop_transcoding, is_animating
         stop_transcoding = False
         directory = self.dir_entry.get().strip()
         if not directory or not os.path.exists(directory):
@@ -398,30 +371,16 @@ class TranscodeApp:
                 self.stop_button.config(state='disabled')
                 is_animating = False
                 self.progress_bar['value'] = 0
-                for proc in subprocesses:
-                    try:
-                        proc.terminate()
-                        proc.wait(timeout=5)
-                    except:
-                        pass
-                subprocesses.clear()
         self.root.after(1000, check_thread)
 
     def stop_transcode(self):
         """Stop the transcoding process and animation."""
-        global stop_transcoding, is_animating, subprocesses
+        global stop_transcoding, is_animating
         stop_transcoding = True
         is_animating = False
         self.start_button.config(state='normal')
         self.stop_button.config(state='disabled')
         self.progress_bar['value'] = 0
-        for proc in subprocesses:
-            try:
-                proc.terminate()
-                proc.wait(timeout=5)
-            except:
-                pass
-        subprocesses.clear()
 
     def update_logs(self):
         """Update the log area with messages from the queue."""
@@ -432,23 +391,6 @@ class TranscodeApp:
                 self.log_text.see(tk.END)
             except queue.Empty:
                 continue
-
-    def on_closing(self):
-        """Handle window close event."""
-        global stop_transcoding, is_animating, subprocesses, self.running
-        stop_transcoding = True
-        is_animating = False
-        self.running = False
-        self.progress_bar['value'] = 0
-        for proc in subprocesses:
-            try:
-                proc.terminate()
-                proc.wait(timeout=5)
-            except:
-                pass
-        subprocesses.clear()
-        pygame.mixer.quit()
-        self.root.destroy()
 
     def __del__(self):
         self.running = False

@@ -42,3 +42,4 @@ A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 - Version: v0.5
 - Suppressed Terminal Windows: Added creationflags=subprocess.CREATE_NO_WINDOW to subprocess.run calls in process_video function to prevent HandBrakeCLI from opening terminal windows during video encoding on Windows, ensuring processes run silently in the background.
 - Window Height Adjustment: Reduced application window height from 700 pixels to 650 pixels (self.root.geometry("600x650")) to provide a tighter layout with balanced top and bottom padding, improving visual aesthetics.
+- Progress Bar Animation: Progressbar in determinate mode that fills from 0% (left) to 100% (right) and resets in a loop for each file being encoded. The animation starts at the beginning of each file’s processing in process_video and stops when the file is done, enhancing visual feedback per file.

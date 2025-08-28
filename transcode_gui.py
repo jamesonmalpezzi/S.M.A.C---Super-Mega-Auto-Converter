@@ -23,20 +23,23 @@ HANDBRAKE_CLI = r"C:\Program Files\HandBrake\HandBrakeCLI.exe"
 # Video extensions to process
 VIDEO_EXTENSIONS = [".mkv", ".avi", ".mov", ".m4v", ".wmv"]
 
-# Sound effect paths (in current directory)
-START_SOUND = "luigi-here-we-go.mp3"
-FINISH_SOUND = "jobs_done.mp3"
-ERROR_SOUND = "bmw-bong.mp3"
+# Sound effect paths (relative to script directory)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+START_SOUND = os.path.join(SCRIPT_DIR, "sounds", "luigi-here-we-go.mp3")
+FINISH_SOUND = os.path.join(SCRIPT_DIR, "sounds", "jobs_done.mp3")
+ERROR_SOUND = os.path.join(SCRIPT_DIR, "sounds", "bmw-bong.mp3")
 
 # Version number
-VERSION = "v0.1"
+VERSION = "v0.5"
 
-# Global flag to control transcoding
+# Global flags and subprocess list
 stop_transcoding = False
+is_animating = False
+subprocesses = []
 
-def process_video(filepath: Path, progress, task_id):
+def process_video(filepath: Path, progress, task_id, app):
     """Run HandBrakeCLI on a single video file and replace it with the processed version."""
-    global stop_transcoding
+    global stop_transcoding, is_animating, subprocesses
     if stop_transcoding:
         log_queue.put("⛔ Transcoding stopped by user")
         return False
@@ -63,34 +66,50 @@ def process_video(filepath: Path, progress, task_id):
     
     # Validate input file with HandBrakeCLI scan
     try:
-        scan_result = subprocess.run([
+        scan_proc = subprocess.Popen([
             HANDBRAKE_CLI,
             "-i", str(filepath),
             "--scan"
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
-        if scan_result.returncode != 0:
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        subprocesses.append(scan_proc)
+        stdout, stderr = scan_proc.communicate(timeout=300)
+        if scan_proc.returncode != 0:
             log_queue.put(f"❌ Invalid video file {filepath}: HandBrake scan failed")
-            log_queue.put(f"STDERR: {scan_result.stderr}")
+            log_queue.put(f"STDERR: {stderr}")
             try:
                 pygame.mixer.Sound(ERROR_SOUND).play()
             except Exception as e:
                 log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+            subprocesses.remove(scan_proc)
             progress.update(task_id, advance=1)
             return True
+        subprocesses.remove(scan_proc)
     except Exception as e:
         log_queue.put(f"❌ Error scanning {filepath}: {str(e)}")
         try:
             pygame.mixer.Sound(ERROR_SOUND).play()
         except Exception as e:
             log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+        if scan_proc in subprocesses:
+            subprocesses.remove(scan_proc)
         progress.update(task_id, advance=1)
         return True
     
     temp_output = filepath.with_suffix(".mp4")
     log_queue.put(f"▶ Processing: {filepath}")
     
+    # Start progress bar animation for this file
+    is_animating = True
+    app.progress_bar['value'] = 0
+    def update_progress():
+        if is_animating:
+            app.progress_bar['value'] = (app.progress_bar['value'] + 5) % 100
+            app.root.after(100, update_progress)
+    
+    app.root.after(100, update_progress)
+    
     try:
-        result = subprocess.run([
+        encode_proc = subprocess.Popen([
             HANDBRAKE_CLI,
             "-i", str(filepath),
             "-o", str(temp_output),
@@ -110,7 +129,25 @@ def process_video(filepath: Path, progress, task_id):
             "--audio-lang-list", "eng",
             "--subtitle-burned",
             "--no-markers"
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3600)
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        subprocesses.append(encode_proc)
+        stdout, stderr = encode_proc.communicate(timeout=3600)
+        if encode_proc.returncode != 0 or not temp_output.exists() or temp_output.stat().st_size == 0:
+            log_queue.put(f"❌ Error processing {filepath}: HandBrake failed or output invalid")
+            log_queue.put(f"STDERR: {stderr}")
+            log_queue.put(f"STDOUT: {stdout}")
+            if temp_output.exists():
+                temp_output.unlink()
+            try:
+                pygame.mixer.Sound(ERROR_SOUND).play()
+            except Exception as e:
+                log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+            is_animating = False
+            app.progress_bar['value'] = 0
+            subprocesses.remove(encode_proc)
+            progress.update(task_id, advance=1)
+            return True
+        subprocesses.remove(encode_proc)
     except subprocess.TimeoutExpired:
         log_queue.put(f"❌ Timeout processing {filepath}: HandBrake took too long")
         if temp_output.exists():
@@ -119,6 +156,10 @@ def process_video(filepath: Path, progress, task_id):
             pygame.mixer.Sound(ERROR_SOUND).play()
         except Exception as e:
             log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+        if encode_proc in subprocesses:
+            subprocesses.remove(encode_proc)
+        is_animating = False
+        app.progress_bar['value'] = 0
         progress.update(task_id, advance=1)
         return True
     except Exception as e:
@@ -129,6 +170,10 @@ def process_video(filepath: Path, progress, task_id):
             pygame.mixer.Sound(ERROR_SOUND).play()
         except Exception as e:
             log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+        if encode_proc in subprocesses:
+            subprocesses.remove(encode_proc)
+        is_animating = False
+        app.progress_bar['value'] = 0
         progress.update(task_id, advance=1)
         return True
     
@@ -136,20 +181,11 @@ def process_video(filepath: Path, progress, task_id):
         log_queue.put("⛔ Transcoding stopped by user")
         if temp_output.exists():
             temp_output.unlink()
+        is_animating = False
+        app.progress_bar['value'] = 0
+        if encode_proc in subprocesses:
+            subprocesses.remove(encode_proc)
         return False
-    
-    if result.returncode != 0 or not temp_output.exists() or temp_output.stat().st_size == 0:
-        log_queue.put(f"❌ Error processing {filepath}: HandBrake failed or output invalid")
-        log_queue.put(f"STDERR: {result.stderr}")
-        log_queue.put(f"STDOUT: {result.stdout}")
-        if temp_output.exists():
-            temp_output.unlink()
-        try:
-            pygame.mixer.Sound(ERROR_SOUND).play()
-        except Exception as e:
-            log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
-        progress.update(task_id, advance=1)
-        return True
     
     log_queue.put(f"✅ Finished: {temp_output}")
     if temp_output.exists() and temp_output.stat().st_size > 0:
@@ -167,6 +203,10 @@ def process_video(filepath: Path, progress, task_id):
             pygame.mixer.Sound(ERROR_SOUND).play()
         except Exception as e:
             log_queue.put(f"❌ Error playing sound {ERROR_SOUND}: {str(e)}")
+    
+    # Stop animation for this file
+    is_animating = False
+    app.progress_bar['value'] = 0
     progress.update(task_id, advance=1)
     return True
 
@@ -180,9 +220,9 @@ def collect_files(root_dir: Path):
                 files.append(file_path)
     return files
 
-def run_transcode(directory, log_text):
+def run_transcode(directory, log_text, app):
     """Run the transcoding process for the given directory."""
-    global stop_transcoding
+    global stop_transcoding, is_animating, subprocesses
     # Check if HandBrakeCLI exists before starting
     if not os.path.exists(HANDBRAKE_CLI):
         log_queue.put(f"❌ HandBrakeCLI.exe not found at {HANDBRAKE_CLI}. Please ensure it is installed.")
@@ -217,7 +257,7 @@ def run_transcode(directory, log_text):
             if stop_transcoding:
                 log_queue.put("⛔ Transcoding stopped by user")
                 break
-            if not process_video(file, progress, task_id):
+            if not process_video(file, progress, task_id, app):
                 break
     
     if not stop_transcoding:
@@ -226,6 +266,17 @@ def run_transcode(directory, log_text):
             pygame.mixer.Sound(FINISH_SOUND).play()
         except Exception as e:
             log_queue.put(f"❌ Error playing sound {FINISH_SOUND}: {str(e)}")
+    # Ensure progress bar is stopped
+    is_animating = False
+    app.progress_bar['value'] = 0
+    # Terminate any remaining subprocesses
+    for proc in subprocesses:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except:
+            pass
+    subprocesses.clear()
 
 class TranscodeApp:
     def __init__(self, root):
@@ -233,7 +284,7 @@ class TranscodeApp:
         self.root.title("S.M.A.C - Super Mega Auto Converter")
         self.root.configure(bg="#f0f0f0")  # Light grey background
         self.root.resizable(True, True)  # Make window resizable
-        self.root.geometry("600x700")  # Set window size to 600px wide, 700px tall
+        self.root.geometry("600x650")  # Set window size to 600px wide, 650px tall
         
         # Apply macOS-like style
         style = ttk.Style()
@@ -241,6 +292,7 @@ class TranscodeApp:
         style.configure("TEntry", font=("Helvetica", 10), fieldbackground="black", foreground="grey")
         style.configure("TButton", font=("Helvetica", 10), background="#f0f0f0", foreground="black")
         style.configure("Stop.TButton", font=("Helvetica", 10), background="#f0f0f0", foreground="red")
+        style.configure("TProgressbar", thickness=10)
         
         # Title frame with image
         title_frame = tk.Frame(root, bg="#f0f0f0")
@@ -248,15 +300,15 @@ class TranscodeApp:
         title_label = ttk.Label(title_frame, text="S.M.A.C - Super Mega Auto Converter", font=("Helvetica", 18, "bold"), foreground="black")
         title_label.pack(side=tk.LEFT)
         
-        # Load and display mario.png from current directory
+        # Load and display mario.png from images directory
         try:
-            mario_img = Image.open("mario.png")
+            mario_img = Image.open(os.path.join(SCRIPT_DIR, "images", "mario.png"))
             mario_img = mario_img.resize((50, 50), Image.LANCZOS)
             self.mario_photo = ImageTk.PhotoImage(mario_img)
             mario_label = ttk.Label(title_frame, image=self.mario_photo, background="#f0f0f0")
             mario_label.pack(side=tk.RIGHT, padx=10)
         except Exception as e:
-            log_queue.put(f"❌ Error loading mario.png: {e}")
+            log_queue.put(f"❌ Error loading images/mario.png: {e}")
         
         # Directory selection
         dir_frame = tk.Frame(root, bg="#f0f0f0")
@@ -277,6 +329,12 @@ class TranscodeApp:
         self.stop_button = ttk.Button(button_frame, text="Stop Transcoding", command=self.stop_transcode, style="Stop.TButton", state='disabled')
         self.stop_button.pack(side=tk.LEFT, padx=10)
         
+        # Animation frame for progress bar
+        animation_frame = tk.Frame(root, bg="#f0f0f0")
+        animation_frame.pack(pady=5)
+        self.progress_bar = ttk.Progressbar(animation_frame, mode='determinate', maximum=100, length=200)
+        self.progress_bar.pack(anchor='center')
+        
         # Log area
         self.log_text = scrolledtext.ScrolledText(root, height=20, width=80, state='normal', font=("Helvetica", 10), fg="green", bg="black")
         self.log_text.pack(pady=20)
@@ -295,6 +353,9 @@ class TranscodeApp:
         self.log_thread = threading.Thread(target=self.update_logs)
         self.log_thread.daemon = True
         self.log_thread.start()
+        
+        # Bind window close event
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def browse_folder(self):
         """Open a native Windows folder picker dialog."""
@@ -305,12 +366,13 @@ class TranscodeApp:
 
     def start_transcode(self):
         """Start the transcoding process in a separate thread."""
-        global stop_transcoding
+        global stop_transcoding, is_animating, subprocesses
         stop_transcoding = False
         directory = self.dir_entry.get().strip()
         if not directory or not os.path.exists(directory):
             self.log_text.insert(tk.END, "Error: Invalid or inaccessible directory\n")
             self.log_text.see(tk.END)
+            self.progress_bar['value'] = 0
             try:
                 pygame.mixer.Sound(ERROR_SOUND).play()
             except Exception as e:
@@ -325,7 +387,8 @@ class TranscodeApp:
             pygame.mixer.Sound(START_SOUND).play()
         except Exception as e:
             self.log_text.insert(tk.END, f"❌ Error playing sound {START_SOUND}: {str(e)}\n")
-        thread = threading.Thread(target=run_transcode, args=(directory, self.log_text))
+        # Start transcoding thread
+        thread = threading.Thread(target=run_transcode, args=(directory, self.log_text, self))
         thread.start()
         def check_thread():
             if thread.is_alive():
@@ -333,14 +396,32 @@ class TranscodeApp:
             else:
                 self.start_button.config(state='normal')
                 self.stop_button.config(state='disabled')
+                is_animating = False
+                self.progress_bar['value'] = 0
+                for proc in subprocesses:
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=5)
+                    except:
+                        pass
+                subprocesses.clear()
         self.root.after(1000, check_thread)
 
     def stop_transcode(self):
-        """Stop the transcoding process."""
-        global stop_transcoding
+        """Stop the transcoding process and animation."""
+        global stop_transcoding, is_animating, subprocesses
         stop_transcoding = True
+        is_animating = False
         self.start_button.config(state='normal')
         self.stop_button.config(state='disabled')
+        self.progress_bar['value'] = 0
+        for proc in subprocesses:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except:
+                pass
+        subprocesses.clear()
 
     def update_logs(self):
         """Update the log area with messages from the queue."""
@@ -352,6 +433,23 @@ class TranscodeApp:
             except queue.Empty:
                 continue
 
+    def on_closing(self):
+        """Handle window close event."""
+        global stop_transcoding, is_animating, subprocesses, self.running
+        stop_transcoding = True
+        is_animating = False
+        self.running = False
+        self.progress_bar['value'] = 0
+        for proc in subprocesses:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except:
+                pass
+        subprocesses.clear()
+        pygame.mixer.quit()
+        self.root.destroy()
+
     def __del__(self):
         self.running = False
         pygame.mixer.quit()
@@ -359,5 +457,4 @@ class TranscodeApp:
 if __name__ == "__main__":
     root = tk.Tk()
     app = TranscodeApp(root)
-
     root.mainloop()

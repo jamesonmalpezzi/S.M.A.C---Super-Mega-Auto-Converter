@@ -9,13 +9,13 @@ if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
 # Define paths
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pythonScript = Join-Path $scriptDir "transcode_gui.py"
-$marioImage = Join-Path $scriptDir "mario.png"
+$marioImage = Join-Path $scriptDir "images/mario.png"
 $handbrakeCli = "C:\Program Files\HandBrake\HandBrakeCLI.exe"
-$startSound = Join-Path $scriptDir "luigi-here-we-go.mp3"
-$finishSound = Join-Path $scriptDir "jobs_done.mp3"
-$errorSound = Join-Path $scriptDir "bmw-bong.mp3"
-$outputDir = Join-Path $scriptDir "dist"
-$executable = Join-Path $outputDir "SMAC_Transcode.exe"
+$startSound = Join-Path $scriptDir "sounds/luigi-here-we-go.mp3"
+$finishSound = Join-Path $scriptDir "sounds/jobs_done.mp3"
+$errorSound = Join-Path $scriptDir "sounds/bmw-bong.mp3"
+$outputDir = $scriptDir
+$executable = Join-Path $outputDir "SMAC.exe"
 
 # Verify that transcode_gui.py exists
 if (-not (Test-Path $pythonScript)) {
@@ -25,7 +25,7 @@ if (-not (Test-Path $pythonScript)) {
 
 # Verify that mario.png exists
 if (-not (Test-Path $marioImage)) {
-    Write-Host "Error: mario.png not found in $scriptDir"
+    Write-Host "Error: images/mario.png not found in $scriptDir"
     exit 1
 }
 
@@ -38,15 +38,22 @@ foreach ($sound in $soundFiles) {
     }
 }
 
+# Remove existing executable to avoid permission issues
+if (Test-Path $executable) {
+    Write-Host "Removing existing $executable..."
+    Remove-Item -Path $executable -Force -ErrorAction SilentlyContinue
+}
+
 # Prepare PyInstaller command
 $pyinstallerArgs = @(
     "--onefile",
     "--windowed",
-    "--name=SMAC_Transcode",
-    "--add-data", "${marioImage};.",
-    "--add-data", "${startSound};.",
-    "--add-data", "${finishSound};.",
-    "--add-data", "${errorSound};.",
+    "--name=SMAC",
+    "--add-data", "${marioImage};images",
+    "--add-data", "${startSound};sounds",
+    "--add-data", "${finishSound};sounds",
+    "--add-data", "${errorSound};sounds",
+    "--distpath", $scriptDir,
     "--clean"
 )
 
@@ -62,16 +69,16 @@ else {
 $pyinstallerArgs += $pythonScript
 
 # Run PyInstaller
-Write-Host "Building SMAC_Transcode executable..."
+Write-Host "Building SMAC executable..."
 pyinstaller @pyinstallerArgs
 
 # Check if build was successful
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "Build successful! Executable is located in $outputDir\SMAC_Transcode.exe"
+    Write-Host "Build successful! Executable is located at $executable"
     
     # Start the executable
     if (Test-Path $executable) {
-        Write-Host "Starting SMAC_Transcode.exe..."
+        Write-Host "Starting SMAC.exe..."
         Start-Process -FilePath $executable
     }
     else {
@@ -87,6 +94,5 @@ else {
 # Clean up temporary build files
 Write-Host "Cleaning up temporary build files..."
 Remove-Item -Path (Join-Path $scriptDir "build") -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -Path (Join-Path $scriptDir "SMAC_Transcode.spec") -Force -ErrorAction SilentlyContinue
-
+Remove-Item -Path (Join-Path $scriptDir "SMAC.spec") -Force -ErrorAction SilentlyContinue
 Write-Host "Done!"

@@ -435,7 +435,7 @@ class TranscodeApp:
 
     def on_closing(self):
         """Handle window close event."""
-        global stop_transcoding, is_animating, subprocesses, self.running
+        global stop_transcoding, is_animating, subprocesses
         stop_transcoding = True
         is_animating = False
         self.running = False

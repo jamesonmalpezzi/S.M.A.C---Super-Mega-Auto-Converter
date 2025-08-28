@@ -38,8 +38,8 @@ A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 - Update directory file paths for media to your personal path
 - Run `transcode_gui.py` or build with `.\build_transcode.ps1` in powershell to create an executable.
 
-## Verison Notes$ `\textcolor{teal}{ \text{ Eq.(3-5) in the main text} } `$
-- <b>Version</b>: <style>p{color:red;}v0.5</style>
+## Verison Notes
+- <b>Version</b>: <small>v0.5</small>
 - <b>Suppressed Terminal Windows</b>:<br> <font color="grey">Added creationflags=subprocess.CREATE_NO_WINDOW to subprocess.run calls in process_video function to prevent HandBrakeCLI from opening terminal windows during video encoding on Windows, ensuring processes run silently in the background.</font>
 - <b>Window Height Adjustment</b>:<br> <font color="#E8E8E8">Reduced application window height from 700 pixels to 650 pixels (self.root.geometry("600x650")) to provide a tighter layout with balanced top and bottom padding, improving visual aesthetics.</font>
 - <b>Progress Bar Animation</b>:<br> <font color="#E8E8E8">Progressbar in determinate mode that fills from 0% (left) to 100% (right) and resets in a loop for each file being encoded. The animation starts at the beginning of each file’s processing in process_video and stops when the file is done, enhancing visual feedback per file.</font>

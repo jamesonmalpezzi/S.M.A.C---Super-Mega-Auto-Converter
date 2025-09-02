@@ -3,7 +3,7 @@
 A Python-based GUI tool for transcoding video files using HandBrakeCLI.
 
 <p align="center">
-<img src="https://github.com/jamesonmalpezzi/S.M.A.C---Super-Mega-Auto-Converter/blob/main/images/screenshot.jpg">
+<img src="https://github.com/jamesonmalpezzi/S.M.A.C---Super-Mega-Auto-Converter/blob/main/screenshot.jpg">
 </p>
 
 ## Features

@@ -9,11 +9,7 @@ if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
 # Define paths
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pythonScript = Join-Path $scriptDir "transcode_gui.py"
-$marioImage = Join-Path $scriptDir "images/mario.png"
 $handbrakeCli = "C:\Program Files\HandBrake\HandBrakeCLI.exe"
-$startSound = Join-Path $scriptDir "sounds/luigi-here-we-go.mp3"
-$finishSound = Join-Path $scriptDir "sounds/jobs_done.mp3"
-$errorSound = Join-Path $scriptDir "sounds/bmw-bong.mp3"
 $outputDir = $scriptDir
 $executable = Join-Path $outputDir "SMAC.exe"
 
@@ -23,25 +19,31 @@ if (-not (Test-Path $pythonScript)) {
     exit 1
 }
 
-# Verify that mario.png exists
-if (-not (Test-Path $marioImage)) {
-    Write-Host "Error: images/mario.png not found in $scriptDir"
-    exit 1
-}
+# Stop any running SMAC.exe processes to avoid permission issues
+Write-Host "Checking for running SMAC.exe processes..."
+Stop-Process -Name "SMAC" -Force -ErrorAction SilentlyContinue
 
-# Verify that sound files exist
-$soundFiles = @($startSound, $finishSound, $errorSound)
-foreach ($sound in $soundFiles) {
-    if (-not (Test-Path $sound)) {
-        Write-Host "Error: Sound file $sound not found"
-        exit 1
-    }
-}
-
-# Remove existing executable to avoid permission issues
+# Remove existing executable with retry mechanism
 if (Test-Path $executable) {
     Write-Host "Removing existing $executable..."
-    Remove-Item -Path $executable -Force -ErrorAction SilentlyContinue
+    $retryCount = 0
+    $maxRetries = 3
+    while ($retryCount -lt $maxRetries) {
+        try {
+            Remove-Item -Path $executable -Force -ErrorAction Stop
+            Write-Host "Successfully removed $executable"
+            break
+        }
+        catch {
+            $retryCount++
+            Write-Host "Attempt $retryCount failed to remove $executable : $_"
+            Start-Sleep -Seconds 2
+            if ($retryCount -eq $maxRetries) {
+                Write-Host "Error: Failed to remove $executable after $maxRetries attempts"
+                exit 1
+            }
+        }
+    }
 }
 
 # Prepare PyInstaller command
@@ -49,11 +51,7 @@ $pyinstallerArgs = @(
     "--onefile",
     "--windowed",
     "--name=SMAC",
-    "--add-data", "${marioImage};images",
-    "--add-data", "${startSound};sounds",
-    "--add-data", "${finishSound};sounds",
-    "--add-data", "${errorSound};sounds",
-    "--distpath", $scriptDir,
+    "--distpath", $outputDir,
     "--clean"
 )
 
@@ -75,7 +73,7 @@ pyinstaller @pyinstallerArgs
 # Check if build was successful
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Build successful! Executable is located at $executable"
-    
+   
     # Start the executable
     if (Test-Path $executable) {
         Write-Host "Starting SMAC.exe..."
